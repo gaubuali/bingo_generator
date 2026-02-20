@@ -1,6 +1,13 @@
-# Bingo Card Generator
+# Bingo Card Generator + Voice Caller
 
-Generates **printable A4 PDF bingo cards** — 2 cards per page plus a caller's sheet.
+A small **Python** app to play bingo at home with family and friends.  
+It is also great for kids to **learn numbers** in a fun and interactive way, since they see the numbers on their cards and hear them spoken by the caller.
+
+- Generates printable A4 PDF bingo cards (2 cards per page) with a caller’s reference sheet.
+- Lets you configure number range, numbers per card, and optional FREE center for square grids.
+- Includes a natural-sounding neural voice caller (edge-tts) with configurable pace and classic UK bingo phrases.
+- You can use the generated cards on paper, while the app acts as the number caller for the game.
+
 
 ## Requirements
 ```
