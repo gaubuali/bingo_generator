@@ -90,15 +90,16 @@ def get_phrase(n: int) -> str:
 
 def _number_to_words(n: int) -> str:
     """Convert a number to a spoken string, e.g. 47 -> 'forty seven'."""
-    ones  = ["", "one","two","three","four","five","six","seven",
+    ones  = ["zero", "one","two","three","four","five","six","seven",
              "eight","nine","ten","eleven","twelve","thirteen",
              "fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"]
     tens  = ["","","twenty","thirty","forty","fifty",
              "sixty","seventy","eighty","ninety"]
     if n < 20:
         return ones[n]
-    t, o = divmod(n, 10)
-    return (tens[t] + (" " + ones[o] if o else "")).strip()
+    if n < 100:
+        t, o = divmod(n, 10)
+        return (tens[t] + (" " + ones[o] if o else "")).strip()
 
 
 # ── edge-tts engine ───────────────────────────────────────────────────────────
