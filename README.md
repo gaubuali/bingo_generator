@@ -8,6 +8,12 @@ It is also great for kids to **learn numbers** in a fun and interactive way, sin
 - Includes a natural-sounding neural voice caller (edge-tts) with configurable pace and classic UK bingo phrases.
 - You can use the generated cards on paper, while the app acts as the number caller for the game.
 
+## How we use it with kids
+
+- Choose a simple range such as 1–30 or 1–50 so younger kids are not overwhelmed.
+- Print a few cards and let each child pick a favourite card to make it feel personal.
+- Run the voice caller so they both **see** the number on the card and **hear** it spoken, helping them connect written and spoken numbers.
+- Encourage kids to read the number aloud before marking it, turning the game into a light number-recognition exercise.
 
 ## Requirements
 ```
