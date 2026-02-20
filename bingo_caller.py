@@ -9,7 +9,7 @@ Two TTS modes:
   2. pyttsx3   (offline)  — uses Windows built-in SAPI5 voices, works offline
 
 Requirements:
-  pip install edge-tts pygame pyttsx3
+  pip install edge-tts pyttsx3
 
 Usage:
   python bingo_caller.py
@@ -19,11 +19,13 @@ import random
 import time
 import sys
 import asyncio
+import os
+import ctypes
+import tempfile
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 try:
     import edge_tts
-    import pygame
     EDGE_AVAILABLE = True
 except ImportError:
     EDGE_AVAILABLE = False
@@ -37,102 +39,116 @@ except ImportError:
 if not EDGE_AVAILABLE and not PYTTSX_AVAILABLE:
     print("\n  ERROR: No TTS engine found.")
     print("  Install at least one:")
-    print("    pip install edge-tts pygame")
+    print("    pip install edge-tts")
     print("    pip install pyttsx3\n")
     sys.exit(1)
 
-# ── edge-tts voices (UK English — very natural) ───────────────────────────────
+# ── edge-tts voices ───────────────────────────────────────────────────────────
 EDGE_VOICES = {
-    "1": ("en-GB-RyanNeural",    "Ryan (UK Male)   — recommended"),
+    "1": ("en-GB-RyanNeural",    "Ryan (UK Male)   \u2014 recommended"),
     "2": ("en-GB-SoniaNeural",   "Sonia (UK Female)"),
     "3": ("en-US-GuyNeural",     "Guy (US Male)"),
     "4": ("en-US-JennyNeural",   "Jenny (US Female)"),
     "5": ("en-AU-WilliamNeural", "William (AU Male)"),
 }
 
-# ── Bingo-style phrases ───────────────────────────────────────────────────────
+# ── Classic bingo call phrases ────────────────────────────────────────────────
 PHRASES = {
-    1:  "Kelly's eye — number one",
-    2:  "One little duck — two",
-    3:  "Cup of tea — three",
-    4:  "Knock at the door — four",
-    5:  "Man alive — five",
-    6:  "Half a dozen — six",
+    1:  "Kelly's eye, number one",
+    2:  "One little duck, two",
+    3:  "Cup of tea, three",
+    4:  "Knock at the door, four",
+    5:  "Man alive, five",
+    6:  "Half a dozen, six",
     7:  "Lucky seven",
-    8:  "Garden gate — eight",
-    9:  "Doctor's orders — nine",
-    10: "Prime Minister's den — ten",
+    8:  "Garden gate, eight",
+    9:  "Doctor's orders, nine",
+    10: "Prime Minister's den, ten",
     11: "Legs eleven",
-    12: "Dozen — twelve",
-    13: "Unlucky for some — thirteen",
-    14: "Valentine's day — fourteen",
+    12: "Dozen, twelve",
+    13: "Unlucky for some, thirteen",
+    14: "Valentine's day, fourteen",
     16: "Sweet sixteen",
-    18: "Coming of age — eighteen",
-    21: "Key of the door — twenty one",
-    22: "Two little ducks — twenty two",
-    33: "Dirty knees — thirty three",
-    40: "Life begins — forty",
-    44: "Droopy drawers — forty four",
-    55: "Snakes alive — fifty five",
-    60: "Five dozen — sixty",
-    66: "Clickety click — sixty six",
-    69: "Anyway up — sixty nine",
-    77: "Sunset strip — seventy seven",
-    88: "Two fat ladies — eighty eight",
-    90: "Top of the shop — ninety",
+    18: "Coming of age, eighteen",
+    21: "Key of the door, twenty one",
+    22: "Two little ducks, twenty two",
+    33: "Dirty knees, thirty three",
+    40: "Life begins, forty",
+    44: "Droopy drawers, forty four",
+    55: "Snakes alive, fifty five",
+    60: "Five dozen, sixty",
+    66: "Clickety click, sixty six",
+    69: "Anyway up, sixty nine",
+    77: "Sunset strip, seventy seven",
+    88: "Two fat ladies, eighty eight",
+    90: "Top of the shop, ninety",
 }
 
-def get_phrase(n: int) -> str:
-    """Return a bingo call phrase, or a plain number announcement."""
-    if n in PHRASES:
-        return PHRASES[n]
-    return _number_to_words(n)
+# ── Number to words ───────────────────────────────────────────────────────────
+_ONES = [
+    "zero","one","two","three","four","five","six","seven","eight","nine",
+    "ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen",
+    "seventeen","eighteen","nineteen"
+]
+_TENS = ["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"]
 
 def _number_to_words(n: int) -> str:
-    """Convert a number to a spoken string, e.g. 47 -> 'forty seven'."""
-    ones  = ["zero", "one","two","three","four","five","six","seven",
-             "eight","nine","ten","eleven","twelve","thirteen",
-             "fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"]
-    tens  = ["","","twenty","thirty","forty","fifty",
-             "sixty","seventy","eighty","ninety"]
     if n < 20:
-        return ones[n]
+        return _ONES[n]
     if n < 100:
         t, o = divmod(n, 10)
-        return (tens[t] + (" " + ones[o] if o else "")).strip()
+        return (_TENS[t] + (" " + _ONES[o] if o else "")).strip()
+    if n < 1000:
+        h, r = divmod(n, 100)
+        rest = (" and " + _number_to_words(r)) if r else ""
+        return _ONES[h] + " hundred" + rest
+    return str(n)
+
+def get_phrase(n: int) -> str:
+    return str(PHRASES[n]) if n in PHRASES else str(_number_to_words(n))
+
+
+# ── Windows MCI audio player (no extra dependencies) ─────────────────────────
+def _play_mp3_windows(path: str):
+    """Play an MP3 file using Windows MCI — handles edge-tts output reliably."""
+    mci = ctypes.windll.winmm.mciSendStringW
+    alias = "bingo_tts"
+    mci(f'open "{path}" type mpegvideo alias {alias}', None, 0, None)
+    mci(f'play {alias} wait', None, 0, None)
+    mci(f'close {alias}', None, 0, None)
 
 
 # ── edge-tts engine ───────────────────────────────────────────────────────────
-async def _speak_edge(text: str, voice: str, rate: str, volume: str):
-    import tempfile, os
+async def _speak_edge_async(text: str, voice: str, rate: str, volume: str):
     communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        tmp = f.name
-    await communicate.save(tmp)
-    pygame.mixer.init()
-    pygame.mixer.music.load(tmp)
-    pygame.mixer.music.play()
-    while pygame.mixer.music.get_busy():
-        pygame.time.Clock().tick(10)
-    pygame.mixer.music.unload()
-    os.remove(tmp)
+    # Use mkstemp so the file handle is closed before edge-tts writes to it
+    fd, tmp = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    try:
+        await communicate.save(tmp)
+        _play_mp3_windows(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 def speak_edge(text: str, voice: str, rate_pct: int, volume_pct: int):
+    text       = str(text)
     rate_str   = f"+{rate_pct}%" if rate_pct >= 0 else f"{rate_pct}%"
     volume_str = f"+{volume_pct}%" if volume_pct >= 0 else f"{volume_pct}%"
-    asyncio.run(_speak_edge(text, voice, rate_str, volume_str))
+    asyncio.run(_speak_edge_async(text, voice, rate_str, volume_str))
 
 
 # ── pyttsx3 engine ────────────────────────────────────────────────────────────
 def speak_pyttsx(text: str, engine, rate: int):
     engine.setProperty("rate", rate)
-    engine.say(text)
+    engine.say(str(text))
     engine.runAndWait()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def pick_voice_menu() -> tuple:
-    """Return (voice_id, mode) where mode is 'edge' or 'pyttsx'."""
     if EDGE_AVAILABLE:
         print("\n  Available voices (edge-tts, natural neural):")
         for k, (_, desc) in EDGE_VOICES.items():
@@ -145,7 +161,7 @@ def pick_voice_menu() -> tuple:
         voice_id = EDGE_VOICES.get(choice, EDGE_VOICES["1"])[0]
         return voice_id, "edge"
     else:
-        print("  edge-tts not available — using offline Windows voice.")
+        print("  edge-tts not available \u2014 using offline Windows voice.")
         return None, "pyttsx"
 
 def get_int(prompt: str, default: int, lo: int, hi: int) -> int:
@@ -153,8 +169,7 @@ def get_int(prompt: str, default: int, lo: int, hi: int) -> int:
     if not val:
         return default
     try:
-        v = int(val)
-        return max(lo, min(hi, v))
+        return max(lo, min(hi, int(val)))
     except ValueError:
         return default
 
@@ -166,37 +181,31 @@ def clear_line():
 def run_caller():
     print()
     print("=" * 54)
-    print("   \U0001F3B1   BINGO NUMBER CALLER                         ")
+    print("   \U0001F3B1   BINGO NUMBER CALLER")
     print("=" * 54)
 
-    # Range
     start = get_int("  Range START (default 1)  : ", 1,   1, 999)
     end   = get_int("  Range END   (default 90) : ", 90, start+1, 999)
 
-    # Voice
     voice_id, mode = pick_voice_menu()
 
-    # Pace (seconds between calls)
-    print("\n  Pace — seconds between each number call")
+    print("\n  Pace \u2014 seconds between each number call")
     print("  Tip: 5s = fast, 10s = relaxed, 15s = slow family game")
     pace = get_int("  Pace in seconds [10]     : ", 10, 1, 60)
 
-    # Rate (how fast the voice speaks)
     if mode == "edge":
         print("\n  Speaking rate adjustment  (-50 = slow, 0 = normal, +50 = fast)")
-        rate = get_int("  Rate adjustment [0]      : ", 0, -100, 100)
-        volume = get_int("  Volume adjustment [0]    : ", 0, -50, 50)
+        rate   = get_int("  Rate adjustment [0]      : ",   0, -100, 100)
+        volume = get_int("  Volume adjustment [0]    : ",   0,  -50,  50)
     else:
         print("\n  Speaking rate (words per minute, default 150)")
-        rate = get_int("  Rate [150]               : ", 150, 50, 400)
+        rate   = get_int("  Rate [150]               : ", 150,  50, 400)
         volume = None
 
-    # Init pyttsx if needed
     pyttsx_engine = None
     if mode == "pyttsx":
         pyttsx_engine = pyttsx3.init()
 
-    # Generate shuffled call order
     numbers = list(range(start, end + 1))
     random.shuffle(numbers)
     total = len(numbers)
@@ -211,17 +220,13 @@ def run_caller():
         for i, n in enumerate(numbers, 1):
             phrase = get_phrase(n)
             called.append(n)
+            print(f"  [{i:>3}/{total}]  #{n:>3}  \u2014  {phrase}")
 
-            # Display
-            print(f"  [{i:>3}/{total}]  #{n:>3}  —  {phrase}")
-
-            # Speak
             if mode == "edge":
                 speak_edge(phrase, voice_id, rate, volume)
             else:
                 speak_pyttsx(phrase, pyttsx_engine, rate)
 
-            # Pause between calls (skip after last number)
             if i < total:
                 for remaining in range(pace, 0, -1):
                     print(f"          next number in {remaining}s ...   ", end="\r", flush=True)
