@@ -4,6 +4,10 @@ Bingo Number Caller
 ====================
 Calls bingo numbers out loud with a natural voice and configurable pace.
 
+Controls during the game:
+  SPACE or P  = pause / resume
+  CTRL+C      = stop early
+
 Two TTS modes:
   1. edge-tts  (default) — Microsoft Neural voices, very natural, needs internet
   2. pyttsx3   (offline)  — uses Windows built-in SAPI5 voices, works offline
@@ -22,6 +26,7 @@ import asyncio
 import os
 import ctypes
 import tempfile
+import msvcrt   # Windows built-in — no install needed
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 try:
@@ -108,10 +113,9 @@ def get_phrase(n: int) -> str:
     return str(PHRASES[n]) if n in PHRASES else str(_number_to_words(n))
 
 
-# ── Windows MCI audio player (no extra dependencies) ─────────────────────────
+# ── Windows MCI audio player ──────────────────────────────────────────────────
 def _play_mp3_windows(path: str):
-    """Play an MP3 file using Windows MCI — handles edge-tts output reliably."""
-    mci = ctypes.windll.winmm.mciSendStringW
+    mci   = ctypes.windll.winmm.mciSendStringW
     alias = "bingo_tts"
     mci(f'open "{path}" type mpegvideo alias {alias}', None, 0, None)
     mci(f'play {alias} wait', None, 0, None)
@@ -121,7 +125,6 @@ def _play_mp3_windows(path: str):
 # ── edge-tts engine ───────────────────────────────────────────────────────────
 async def _speak_edge_async(text: str, voice: str, rate: str, volume: str):
     communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
-    # Use mkstemp so the file handle is closed before edge-tts writes to it
     fd, tmp = tempfile.mkstemp(suffix=".mp3")
     os.close(fd)
     try:
@@ -147,7 +150,57 @@ def speak_pyttsx(text: str, engine, rate: int):
     engine.runAndWait()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Pause / resume helpers ────────────────────────────────────────────────────
+def flush_keys():
+    """Discard any buffered keypresses."""
+    while msvcrt.kbhit():
+        msvcrt.getch()
+
+def clear_line():
+    print("\r" + " " * 70 + "\r", end="", flush=True)
+
+def wait_for_resume():
+    """Block until the user presses any key, showing a PAUSED banner."""
+    clear_line()
+    print("  \u23F8  PAUSED  \u2014  press any key to resume ...", end="\r", flush=True)
+    flush_keys()
+    msvcrt.getch()          # wait for keypress
+    clear_line()
+    print("  \u25B6  Resuming ...", end="\r", flush=True)
+    time.sleep(0.4)
+    clear_line()
+
+def countdown_with_pause(pace: int):
+    """
+    Count down `pace` seconds between numbers.
+    SPACE or P pauses; any key resumes.
+    """
+    flush_keys()
+    remaining = pace
+    while remaining > 0:
+        print(
+            f"  \u23F3  Next number in {remaining:>2}s  \u2014  [SPACE] to pause ...   ",
+            end="\r", flush=True
+        )
+        time.sleep(1)
+        remaining -= 1
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            if key in (b" ", b"p", b"P"):
+                wait_for_resume()
+    clear_line()
+
+
+# ── Input helper ──────────────────────────────────────────────────────────────
+def get_int(prompt: str, default: int, lo: int, hi: int) -> int:
+    val = input(prompt).strip()
+    if not val:
+        return default
+    try:
+        return max(lo, min(hi, int(val)))
+    except ValueError:
+        return default
+
 def pick_voice_menu() -> tuple:
     if EDGE_AVAILABLE:
         print("\n  Available voices (edge-tts, natural neural):")
@@ -163,18 +216,6 @@ def pick_voice_menu() -> tuple:
     else:
         print("  edge-tts not available \u2014 using offline Windows voice.")
         return None, "pyttsx"
-
-def get_int(prompt: str, default: int, lo: int, hi: int) -> int:
-    val = input(prompt).strip()
-    if not val:
-        return default
-    try:
-        return max(lo, min(hi, int(val)))
-    except ValueError:
-        return default
-
-def clear_line():
-    print("\r" + " " * 60 + "\r", end="", flush=True)
 
 
 # ── Main caller loop ──────────────────────────────────────────────────────────
@@ -211,7 +252,7 @@ def run_caller():
     total = len(numbers)
 
     print(f"\n  Ready! Calling {total} numbers with {pace}s pace.")
-    print("  Press ENTER to start, then CTRL+C to stop at any time.\n")
+    print("  SPACE = pause/resume  |  CTRL+C = stop early\n")
     input("  >> Press ENTER to begin...")
     print()
 
@@ -227,11 +268,9 @@ def run_caller():
             else:
                 speak_pyttsx(phrase, pyttsx_engine, rate)
 
+            # Countdown with pause support (skip after last number)
             if i < total:
-                for remaining in range(pace, 0, -1):
-                    print(f"          next number in {remaining}s ...   ", end="\r", flush=True)
-                    time.sleep(1)
-                clear_line()
+                countdown_with_pause(pace)
 
     except KeyboardInterrupt:
         print("\n\n  Stopped early.")
